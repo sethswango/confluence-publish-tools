@@ -68,6 +68,22 @@ def render_mermaid_to_png(mermaid_code: str, output_path: Path) -> bool:
     return result.returncode == 0 and output_path.exists()
 
 
+def auto_sanitize(md: str) -> str:
+    """Apply only mechanical, non-lossy transformations. Anything requiring
+    judgment about what to keep vs. remove is handled by the agent BEFORE
+    calling this script, by passing a pre-sanitized string via --body."""
+    # [[wikilinks]] -> plain text (mechanical — Confluence can't render these)
+    md = re.sub(r"\[\[([^\]|]+)\|([^\]]+)\]\]", r"\2", md)
+    md = re.sub(r"\[\[([^\]]+)\]\]", r"\1", md)
+    # ![[embedded images]] -> remove (Obsidian-only embed syntax)
+    md = re.sub(r"!\[\[([^\]]+)\]\]", "", md)
+    # Obsidian callout syntax -> plain blockquote
+    md = re.sub(r"^>\s*\[!(\w+)\]\s*", r"> **\1:** ", md, flags=re.MULTILINE)
+    # Clean up triple+ blank lines
+    md = re.sub(r"\n{3,}", "\n\n", md)
+    return md
+
+
 def markdown_to_html(md_text: str, pandoc: str) -> str:
     result = subprocess.run(
         [pandoc, "--from=gfm", "--to=html5"],
@@ -157,6 +173,9 @@ def main():
     parser.add_argument("--token", default=os.environ.get("CONFLUENCE_TOKEN", ""), help="Atlassian PAT")
     parser.add_argument("--message", default="", help="Version message for updates")
     parser.add_argument("--diagram-width", type=int, default=800, help="Width for diagram images in Confluence")
+    parser.add_argument("--body", help="Pre-sanitized markdown string to use instead of reading the file. "
+                                       "The file is still required for Mermaid rendering context but its "
+                                       "text content is replaced by this string.")
     args = parser.parse_args()
 
     if not args.email or not args.token:
@@ -167,7 +186,13 @@ def main():
 
     pandoc = find_pandoc()
     auth = auth_header(args.email, args.token)
-    md = args.markdown_file.read_text(encoding="utf-8")
+
+    if args.body:
+        md = args.body
+    else:
+        md = args.markdown_file.read_text(encoding="utf-8")
+
+    md = auto_sanitize(md)
 
     if not args.title:
         title_match = re.search(r"^#\s+(.+)$", md, re.MULTILINE)
