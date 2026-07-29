@@ -86,7 +86,7 @@ def auto_sanitize(md: str) -> str:
 
 def markdown_to_html(md_text: str, pandoc: str) -> str:
     result = subprocess.run(
-        [pandoc, "--from=gfm", "--to=html5"],
+        [pandoc, "--from=gfm", "--to=html5", "--wrap=none"],
         input=md_text.encode("utf-8"),
         capture_output=True, check=True,
     )
@@ -101,7 +101,11 @@ def upload_attachment(page_id: str, file_path: Path, auth: str) -> bool:
          "-H", "X-Atlassian-Token: nocheck",
          "-F", f"file=@{file_path}",
          "-F", "minorEdit=true"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
     )
     status = result.stdout.strip()[-3:] if result.stdout else "???"
     return status == "200"
@@ -115,27 +119,54 @@ def create_page(space_id: str, parent_id: str, title: str, body: str, auth: str)
         "parentId": parent_id,
         "body": {"representation": "storage", "value": body},
     }
-    result = subprocess.run(
-        ["curl.exe", "-s", "-X", "POST",
-         f"https://{CONFLUENCE_DOMAIN}/wiki/api/v2/pages",
-         "-H", f"Authorization: Basic {auth}",
-         "-H", "Content-Type: application/json",
-         "-d", json.dumps(payload, ensure_ascii=False)],
-        capture_output=True, text=True, check=False,
-    )
-    data = json.loads(result.stdout)
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    ) as f:
+        json.dump(payload, f, ensure_ascii=False)
+        payload_path = f.name
+    try:
+        result = subprocess.run(
+            [
+                "curl.exe",
+                "-s",
+                "-X",
+                "POST",
+                f"https://{CONFLUENCE_DOMAIN}/wiki/api/v2/pages",
+                "-H",
+                f"Authorization: Basic {auth}",
+                "-H",
+                "Content-Type: application/json",
+                "-d",
+                f"@{payload_path}",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    finally:
+        Path(payload_path).unlink(missing_ok=True)
+    raw = result.stdout or ""
+    if not raw.strip():
+        raise RuntimeError(f"Page creation failed: empty curl stdout; stderr={result.stderr!r}")
+    data = json.loads(raw)
     if "id" in data:
         return data["id"]
-    raise RuntimeError(f"Page creation failed: {result.stdout[:500]}")
+    raise RuntimeError(f"Page creation failed: {raw[:2000]}")
 
 
 def get_page_version(page_id: str, auth: str) -> int:
     result = subprocess.run(
         ["curl.exe", "-s", f"{CONFLUENCE_API}/{page_id}?expand=version",
          "-H", f"Authorization: Basic {auth}"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
     )
-    return json.loads(result.stdout)["version"]["number"]
+    return json.loads(result.stdout or "{}")["version"]["number"]
 
 
 def update_page(page_id: str, title: str, body: str, version: int, auth: str, message: str = "") -> bool:
@@ -155,9 +186,13 @@ def update_page(page_id: str, title: str, body: str, version: int, auth: str, me
              "-H", f"Authorization: Basic {auth}",
              "-H", "Content-Type: application/json",
              "-d", f"@{payload_path}"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
         )
-        return "200" in result.stdout.split("\n")[-1]
+        return "200" in (result.stdout or "").split("\n")[-1]
     finally:
         Path(payload_path).unlink(missing_ok=True)
 
