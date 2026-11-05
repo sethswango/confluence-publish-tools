@@ -55,6 +55,12 @@ def auth_header(email: str, token: str) -> str:
     return base64.b64encode(f"{email}:{token}".encode()).decode()
 
 
+def auth_config(auth: str) -> str:
+    """curl config holding the auth header, fed on stdin (curl -K -) so the
+    credential never appears in process arguments."""
+    return f'header = "Authorization: Basic {auth}"\n'
+
+
 def render_mermaid_to_png(mermaid_code: str, output_path: Path) -> bool:
     mmd_path = output_path.with_suffix(".mmd")
     mmd_path.write_text(mermaid_code, encoding="utf-8")
@@ -97,10 +103,11 @@ def upload_attachment(page_id: str, file_path: Path, auth: str) -> bool:
     result = subprocess.run(
         ["curl.exe", "-s", "-w", "%{http_code}", "-X", "POST",
          f"{CONFLUENCE_API}/{page_id}/child/attachment",
-         "-H", f"Authorization: Basic {auth}",
+         "-K", "-",
          "-H", "X-Atlassian-Token: nocheck",
          "-F", f"file=@{file_path}",
          "-F", "minorEdit=true"],
+        input=auth_config(auth),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -132,13 +139,14 @@ def create_page(space_id: str, parent_id: str, title: str, body: str, auth: str)
                 "-X",
                 "POST",
                 f"https://{CONFLUENCE_DOMAIN}/wiki/api/v2/pages",
-                "-H",
-                f"Authorization: Basic {auth}",
+                "-K",
+                "-",
                 "-H",
                 "Content-Type: application/json",
                 "-d",
                 f"@{payload_path}",
             ],
+            input=auth_config(auth),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -159,7 +167,8 @@ def create_page(space_id: str, parent_id: str, title: str, body: str, auth: str)
 def get_page_version(page_id: str, auth: str) -> int:
     result = subprocess.run(
         ["curl.exe", "-s", f"{CONFLUENCE_API}/{page_id}?expand=version",
-         "-H", f"Authorization: Basic {auth}"],
+         "-K", "-"],
+        input=auth_config(auth),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -183,9 +192,10 @@ def update_page(page_id: str, title: str, body: str, version: int, auth: str, me
         result = subprocess.run(
             ["curl.exe", "-s", "-w", "\n%{http_code}", "-X", "PUT",
              f"{CONFLUENCE_API}/{page_id}",
-             "-H", f"Authorization: Basic {auth}",
+             "-K", "-",
              "-H", "Content-Type: application/json",
              "-d", f"@{payload_path}"],
+            input=auth_config(auth),
             capture_output=True,
             text=True,
             encoding="utf-8",
