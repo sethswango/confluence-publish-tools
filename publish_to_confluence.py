@@ -9,17 +9,17 @@ Requirements:
   - npx available (for @mermaid-js/mermaid-cli)
   - Python 3.10+
 
-Usage:
+Usage (CONFLUENCE_EMAIL and CONFLUENCE_TOKEN set in this process's environment):
   python publish_to_confluence.py <markdown-file> \\
       --space-id 1222049790 \\
-      --parent-id 26508984338 \\
-      --email seth.swango@veteransunited.com \\
-      --token <ATLASSIAN_PAT>
-
-  Or set env vars: CONFLUENCE_EMAIL, CONFLUENCE_TOKEN
+      --parent-id 26508984338
 
   To update an existing page instead of creating:
       --page-id 26509934624
+
+The PAT is read only from CONFLUENCE_TOKEN; --token is refused, because a value on
+the command line is visible to every process on the machine. curl.exe gets the
+auth header on stdin (-K -), never in its arguments.
 """
 from __future__ import annotations
 
@@ -207,28 +207,38 @@ def update_page(page_id: str, title: str, body: str, version: int, auth: str, me
         Path(payload_path).unlink(missing_ok=True)
 
 
-def main():
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Publish markdown to Confluence with Mermaid diagram support")
     parser.add_argument("markdown_file", type=Path, help="Path to the markdown file")
     parser.add_argument("--space-id", required=True, help="Confluence space ID (numeric)")
     parser.add_argument("--parent-id", required=True, help="Parent page or folder ID")
     parser.add_argument("--page-id", help="Existing page ID to update (omit to create new)")
     parser.add_argument("--title", help="Page title (defaults to first H1 in markdown)")
-    parser.add_argument("--email", default=os.environ.get("CONFLUENCE_EMAIL", ""), help="Atlassian email")
-    parser.add_argument("--token", default=os.environ.get("CONFLUENCE_TOKEN", ""), help="Atlassian PAT")
+    parser.add_argument("--email", default=os.environ.get("CONFLUENCE_EMAIL", ""),
+                        help="Atlassian email (default: CONFLUENCE_EMAIL)")
+    # Declared only so it can be refused: an unknown option would make argparse echo the PAT.
+    parser.add_argument("--token", help=argparse.SUPPRESS)
     parser.add_argument("--message", default="", help="Version message for updates")
     parser.add_argument("--diagram-width", type=int, default=800, help="Width for diagram images in Confluence")
     parser.add_argument("--body", help="Pre-sanitized markdown string to use instead of reading the file. "
                                        "The file is still required for Mermaid rendering context but its "
                                        "text content is replaced by this string.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
+    if args.token is not None:
+        parser.error("--token is refused: it puts the PAT in process arguments. "
+                     "Set CONFLUENCE_TOKEN in the environment instead.")
+    args.token = os.environ.get("CONFLUENCE_TOKEN", "")
     if not args.email or not args.token:
-        parser.error("--email and --token required (or set CONFLUENCE_EMAIL / CONFLUENCE_TOKEN)")
+        parser.error("CONFLUENCE_TOKEN must be set in the environment, and CONFLUENCE_EMAIL or --email given")
 
     if not args.markdown_file.exists():
         parser.error(f"File not found: {args.markdown_file}")
+    return args
 
+
+def main():
+    args = parse_args()
     pandoc = find_pandoc()
     auth = auth_header(args.email, args.token)
 

@@ -18,14 +18,22 @@ Normal workflow:
 - do not create a workspace staging folder for publish intermediates
 - if a temporary staged file is truly unavoidable, use a named `C:\dev\.scratch\sessions\YYYYMMDD-HHMM-confluence-publish\` folder and remove known-owned intermediates after verification
 
+### Credentials
+
+The script reads the PAT only from `CONFLUENCE_TOKEN`, and the email from `CONFLUENCE_EMAIL` (or `--email`). It refuses `--token`: a value on the command line is visible to every process on the machine. Load both into the process that runs the script, in the same command group; in `C:\dev` that is:
+
+```powershell
+& C:\dev\.secrets\bin\Use-WorkspaceSecrets.ps1 -Name CONFLUENCE_EMAIL,CONFLUENCE_TOKEN
+```
+
+curl.exe then gets the auth header on stdin (`-K -`), never in its arguments.
+
 ### Create a new page
 
 ```powershell
 python publish_to_confluence.py "path/to/document.md" `
     --space-id 1222049790 `
-    --parent-id 26508984338 `
-    --email seth.swango@veteransunited.com `
-    --token $env:CONFLUENCE_TOKEN
+    --parent-id 26508984338
 ```
 
 ### Update an existing page
@@ -35,18 +43,13 @@ python publish_to_confluence.py "path/to/document.md" `
     --space-id 1222049790 `
     --parent-id 26508984338 `
     --page-id 26509934624 `
-    --email seth.swango@veteransunited.com `
-    --token $env:CONFLUENCE_TOKEN `
     --message "Updated with latest findings"
 ```
 
-### Environment variables
-
-Set these to avoid passing auth on every call:
+### Tests
 
 ```powershell
-$env:CONFLUENCE_EMAIL = "seth.swango@veteransunited.com"
-$env:CONFLUENCE_TOKEN = "your-atlassian-pat"
+uv run --no-project python -m unittest -v test_publish_to_confluence
 ```
 
 ## What it does
